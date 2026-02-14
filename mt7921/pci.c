@@ -33,6 +33,10 @@ static bool mt7921_disable_aspm;
 module_param_named(disable_aspm, mt7921_disable_aspm, bool, 0644);
 MODULE_PARM_DESC(disable_aspm, "disable PCI ASPM support");
 
+static bool mt7921_reset_on_resume;
+module_param_named(reset_on_resume, mt7921_reset_on_resume, bool, 0644);
+MODULE_PARM_DESC(reset_on_resume, "reset device on resume");
+
 static int mt7921e_init_reset(struct mt792x_dev *dev)
 {
 	return mt792x_wpdma_reset(dev, true);
@@ -387,6 +391,8 @@ static int mt7921_pci_probe(struct pci_dev *pdev,
 	if (of_property_read_bool(dev->mt76.dev->of_node, "wakeup-source"))
 		device_init_wakeup(dev->mt76.dev, true);
 
+	dev_info(mdev->dev, "driver will reset device on OS resume: %s\n", mt7921_reset_on_resume ? "true" : "false");
+
 	return 0;
 
 err_free_irq:
@@ -421,6 +427,9 @@ static int mt7921_pci_suspend(struct device *device)
 	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
 	struct mt76_connac_pm *pm = &dev->pm;
 	int i, err;
+
+	if (mt7921_reset_on_resume)
+		return 0;
 
 	pm->suspended = true;
 	flush_work(&dev->reset_work);
@@ -504,6 +513,11 @@ static int mt7921_pci_resume(struct device *device)
 	struct mt792x_dev *dev = container_of(mdev, struct mt792x_dev, mt76);
 	struct mt76_connac_pm *pm = &dev->pm;
 	int i, err;
+
+	if (mt7921_reset_on_resume) {
+		mt792x_reset(&dev->mt76);
+		return 0;
+	}
 
 	err = mt792x_mcu_drv_pmctrl(dev);
 	if (err < 0)
