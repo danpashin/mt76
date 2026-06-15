@@ -403,6 +403,21 @@ mt7915_mcu_rx_bcc_notify(struct mt7915_dev *dev, struct sk_buff *skb)
 }
 
 static void
+mt7915_mcu_rx_ps_sync(struct mt7915_dev *dev, struct sk_buff *skb)
+{
+	struct mt7915_mcu_ps_notify *p = (void *)skb->data;
+	struct mt76_wcid *wcid;
+	u16 wcid_idx;
+
+	wcid_idx = p->wtbl_lower | (p->wtbl_higher << 8);
+	wcid = mt76_wcid_ptr(dev, wcid_idx);
+	if (!wcid || !wcid_to_sta(wcid))
+		return;
+
+	mt76_sta_ps_transition(&dev->mt76, wcid, !!p->ps_bit);
+}
+
+static void
 mt7915_mcu_rx_ext_event(struct mt7915_dev *dev, struct sk_buff *skb)
 {
 	struct mt76_connac2_mcu_rxd *rxd;
@@ -423,6 +438,9 @@ mt7915_mcu_rx_ext_event(struct mt7915_dev *dev, struct sk_buff *skb)
 		break;
 	case MCU_EXT_EVENT_BCC_NOTIFY:
 		mt7915_mcu_rx_bcc_notify(dev, skb);
+		break;
+	case MCU_EXT_EVENT_PS_SYNC:
+		mt7915_mcu_rx_ps_sync(dev, skb);
 		break;
 	default:
 		break;
@@ -3549,10 +3567,18 @@ int mt7915_mcu_get_txpower_sku(struct mt7915_phy *phy, s8 *txpower, int len,
 	if (category == TX_POWER_INFO_RATE) {
 		s8 res[MT7915_SKU_RATE_NUM][2];
 
+		if (skb->len < sizeof(res) + 4) {
+			dev_kfree_skb(skb);
+			return -EINVAL;
+		}
 		memcpy(res, skb->data + 4, sizeof(res));
 		for (i = 0; i < len; i++)
 			txpower[i] = res[i][req.band_idx];
 	} else if (category == TX_POWER_INFO_PATH) {
+		if (skb->len < len + 4) {
+			dev_kfree_skb(skb);
+			return -EINVAL;
+		}
 		memcpy(txpower, skb->data + 4, len);
 	}
 
