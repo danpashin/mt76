@@ -81,6 +81,13 @@ static int mt7925u_mac_reset(struct mt792x_dev *dev)
 {
 	int err;
 
+	if (atomic_read(&dev->mt76.bus_hung))
+		return 0;
+
+	mt792xu_reset_on_bus_error(dev);
+	if (atomic_read(&dev->mt76.bus_hung))
+		return 0;
+
 	mt76_txq_schedule_all(&dev->mphy);
 	mt76_worker_disable(&dev->mt76.tx_worker);
 
@@ -269,6 +276,7 @@ static int mt7925u_suspend(struct usb_interface *intf, pm_message_t state)
 	pm->suspended = true;
 	dev->hif_resumed = false;
 	flush_work(&dev->reset_work);
+	cancel_delayed_work_sync(&dev->mlo_pm_work);
 
 	mt76_connac_mcu_set_hif_suspend(&dev->mt76, true, false);
 	ret = wait_event_timeout(dev->wait,
@@ -340,6 +348,19 @@ failed:
 }
 #endif /* CONFIG_PM */
 
+static void mt7925u_disconnect(struct usb_interface *usb_intf)
+{
+	struct mt792x_dev *dev = usb_get_intfdata(usb_intf);
+
+	/* mt792xu_disconnect() ends in mt76_free_device(), so the work has to
+	 * go before it rather than after mt76_unregister_device() as on PCI.
+	 */
+	if (dev)
+		cancel_work_sync(&dev->nan_deferred_work);
+
+	mt792xu_disconnect(usb_intf);
+}
+
 MODULE_DEVICE_TABLE(usb, mt7925u_device_table);
 MODULE_FIRMWARE(MT7925_FIRMWARE_WM);
 MODULE_FIRMWARE(MT7925_ROM_PATCH);
@@ -348,7 +369,7 @@ static struct usb_driver mt7925u_driver = {
 	.name		= KBUILD_MODNAME,
 	.id_table	= mt7925u_device_table,
 	.probe		= mt7925u_probe,
-	.disconnect	= mt792xu_disconnect,
+	.disconnect	= mt7925u_disconnect,
 #ifdef CONFIG_PM
 	.suspend	= mt7925u_suspend,
 	.resume		= mt7925u_resume,

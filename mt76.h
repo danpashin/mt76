@@ -30,11 +30,7 @@ static inline bool ieee80211_txq_aql_pending(struct ieee80211_hw *hw, struct iee
 }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,6,0)
-#include <net/page_pool.h>
-#else
 #include <net/page_pool/helpers.h>
-#endif
 #include "util.h"
 #include "testmode.h"
 
@@ -694,6 +690,7 @@ struct mt76_usb {
 
 	u8 out_ep[__MT_EP_OUT_MAX];
 	u8 in_ep[__MT_EP_IN_MAX];
+	void (*ctrl_timeout)(struct mt76_dev *dev, int err);
 	bool sg_en;
 
 	struct mt76u_mcu {
@@ -893,6 +890,7 @@ struct mt76_phy {
 	struct cfg80211_chan_def main_chandef;
 	bool offchannel;
 	bool radar_enabled;
+	bool no_active_monitor;
 
 	struct delayed_work roc_work;
 	struct ieee80211_vif *roc_vif;
@@ -962,6 +960,9 @@ struct mt76_dev {
 	const struct mt76_bus_ops *bus;
 	const struct mt76_driver_ops *drv;
 	const struct mt76_mcu_ops *mcu_ops;
+
+	/* Optional callback to finalize wiphy state before registration. */
+	int (*init_wiphy)(struct mt76_dev *dev);
 	struct device *dev;
 	struct device *dma_dev;
 
@@ -1442,6 +1443,13 @@ mtxq_to_txq(struct mt76_txq *mtxq)
 	return container_of(ptr, struct ieee80211_txq, drv_priv);
 }
 
+/* peer-wide state uses the wcid of the primary link */
+static inline struct mt76_wcid *
+mt76_wcid_primary(struct mt76_wcid *wcid)
+{
+	return wcid->def_wcid ? wcid->def_wcid : wcid;
+}
+
 static inline struct ieee80211_sta *
 wcid_to_sta(struct mt76_wcid *wcid)
 {
@@ -1760,12 +1768,12 @@ static inline int mt76_npu_send_txrx_addr(struct mt76_dev *dev, int ifindex,
 
 static inline bool mt76_npu_device_active(struct mt76_dev *dev)
 {
-	return !!rcu_access_pointer(dev->mmio.npu);
+	return mt76_is_mmio(dev) && !!rcu_access_pointer(dev->mmio.npu);
 }
 
 static inline bool mt76_ppe_device_active(struct mt76_dev *dev)
 {
-	return !!rcu_access_pointer(dev->mmio.ppe_dev);
+	return mt76_is_mmio(dev) && !!rcu_access_pointer(dev->mmio.ppe_dev);
 }
 
 static inline int mt76_npu_send_msg(struct airoha_npu *npu, int ifindex,
@@ -2147,6 +2155,9 @@ mt76_vif_link(struct mt76_dev *dev, struct ieee80211_vif *vif, int link_id)
 
 	if (!link_id)
 		return mlink;
+
+	if (link_id >= IEEE80211_MLD_MAX_NUM_LINKS)
+		return NULL;
 
 	return mt76_dereference(mvif->link[link_id], dev);
 }

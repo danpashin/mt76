@@ -914,7 +914,7 @@ static void mt7986_wmac_clock_enable(struct mt7915_dev *dev, u32 adie_type)
 
 		read_poll_timeout(mt76_rr, cur, !(cur & MT_SLP_CTRL_BSY_MASK),
 				  USEC_PER_MSEC, 50 * USEC_PER_MSEC, false,
-				  dev, MT_ADIE_SLP_CTRL_CK0(0));
+				  dev, MT_ADIE_SLP_CTRL_CK0(1));
 	}
 	mt76_wmac_spi_unlock(dev);
 
@@ -1283,20 +1283,11 @@ free_device:
 	return ret;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
-static int
-#else
-static void
-#endif
-mt798x_wmac_remove(struct platform_device *pdev)
+static void mt798x_wmac_remove(struct platform_device *pdev)
 {
 	struct mt7915_dev *dev = platform_get_drvdata(pdev);
 
 	mt7915_unregister_device(dev);
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
-	return 0;
-#endif
 }
 
 static const struct of_device_id mt798x_wmac_of_match[] = {
